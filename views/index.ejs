@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-zinc-950 text-white min-h-screen p-8">
+
+<div class="max-w-6xl mx-auto flex flex-col items-center">
+
+    <h1 class="text-4xl font-bold mb-8 text-center tracking-wide">
+        Page Replacement Simulator
+    </h1>
+
+    <form action="/simulate" method="POST"
+        class="w-full bg-zinc-900/80 backdrop-blur p-6 rounded-2xl border border-zinc-700 mb-8 space-y-4 shadow-lg">
+
+        <input name="sequence" placeholder="1 2 3 4 1 2 5"
+            class="w-full p-3 bg-zinc-950 border border-zinc-700 rounded-lg">
+
+        <input name="frames" type="number"
+            class="w-full p-3 bg-zinc-950 border border-zinc-700 rounded-lg">
+
+        <select name="algorithm"
+            class="w-full p-3 bg-zinc-950 border border-zinc-700 rounded-lg">
+            <option value="FIFO">FIFO</option>
+            <option value="LRU">LRU</option>
+            <option value="OPTIMAL">OPTIMAL</option>
+        </select>
+
+        <button class="w-full bg-white text-black py-3 rounded-lg font-semibold">
+            Run Simulation
+        </button>
+    </form>
+
+    <% if (result) { %>
+
+    <% 
+        let hits = result.steps.filter(s => s.hit).length;
+        let faults = result.faults;
+        let total = result.sequence.length;
+        let hitRatio = (hits / total).toFixed(2);
+        let faultRatio = (faults / total).toFixed(2);
+    %>
+
+    <!-- STATS -->
+    <div class="grid grid-cols-5 gap-6 mb-6 text-center w-full">
+        <div class="bg-zinc-900 p-4 rounded-xl border border-zinc-700">
+            Algo<br><b><%= result.algorithm %></b>
+        </div>
+        <div class="bg-zinc-900 p-4 rounded-xl border border-zinc-700">
+            Hits<br><span class="text-green-400"><%= hits %></span>
+        </div>
+        <div class="bg-zinc-900 p-4 rounded-xl border border-zinc-700">
+            Faults<br><span class="text-red-400"><%= faults %></span>
+        </div>
+        <div class="bg-zinc-900 p-4 rounded-xl border border-zinc-700">
+            Hit R<br><span class="text-green-300"><%= hitRatio %></span>
+        </div>
+        <div class="bg-zinc-900 p-4 rounded-xl border border-zinc-700">
+            Fault R<br><span class="text-yellow-300"><%= faultRatio %></span>
+        </div>
+    </div>
+
+    <!-- TABLE -->
+    <div id="tableContainer"
+         class="overflow-x-auto border border-zinc-700 rounded-xl p-6 mt-8 hidden bg-zinc-900 shadow-lg w-full">
+
+        <table class="border-separate border-spacing-x-3 text-center w-full">
+
+            <tr>
+                <td></td>
+                <% result.steps.forEach((_, i) => { %>
+                    <td>S<%= i+1 %></td>
+                <% }) %>
+            </tr>
+
+            <tr>
+                <td>Ref</td>
+                <% result.sequence.forEach(val => { %>
+                    <td><%= val %></td>
+                <% }) %>
+            </tr>
+
+            <% for (let f = 0; f < result.steps[0].frames.length; f++) { %>
+            <tr>
+                <td>F<%= f+1 %></td>
+                <% result.steps.forEach(step => { %>
+                    <td class="border border-zinc-700 p-2">
+                        <%= step.frames[f] === -1 ? '-' : step.frames[f] %>
+                    </td>
+                <% }) %>
+            </tr>
+            <% } %>
+
+            <tr>
+                <td>Status</td>
+                <% result.steps.forEach(step => { %>
+                    <td class="<%= step.hit ? 'text-green-400' : 'text-yellow-400' %> font-bold">
+                        <%= step.hit ? 'H' : 'F' %>
+                    </td>
+                <% }) %>
+            </tr>
+
+        </table>
+    </div>
+
+    <!-- HIT/FAULT GRAPH -->
+    <div class="mt-8 flex justify-center">
+        <div class="text-center">
+            <h2 class="mb-2">Hit / Fault Timeline</h2>
+            <canvas id="graph" width="500" height="120"
+                class="border border-zinc-700 rounded-lg bg-zinc-900"></canvas>
+        </div>
+    </div>
+
+    <!-- BELADY GRAPH -->
+    <div class="mt-10 flex justify-center">
+        <div class="text-center">
+            <h2 class="mb-3 text-lg font-semibold">Belady’s Anomaly (FIFO)</h2>
+
+            <canvas id="beladyGraph" width="750" height="260"
+                class="border border-zinc-700 rounded-lg bg-zinc-900"></canvas>
+
+            <div id="beladyMsg" class="mt-3 font-bold text-lg"></div>
+        </div>
+    </div>
+
+    <% } %>
+
+</div>
+
+<script>
+<% if (result) { %>
+
+let currentStep = 0;
+
+const sequence = <%- JSON.stringify(result.sequence) %>;
+const steps = <%- JSON.stringify(result.steps) %>;
+const algorithm = "<%= result.algorithm %>";
+
+function startSimulation() {
+
+    const tableContainer = document.getElementById("tableContainer");
+    const rows = document.querySelectorAll("tr");
+
+    setTimeout(() => {
+        tableContainer.classList.remove("hidden");
+
+        rows.forEach(row => {
+            for (let i = 1; i < row.children.length; i++) {
+                row.children[i].style.visibility = "hidden";
+            }
+        });
+
+        function showNext() {
+            if (currentStep >= steps.length) return;
+
+            let col = currentStep + 1;
+
+            rows.forEach(row => {
+                if (row.children[col]) {
+                    row.children[col].style.visibility = "visible";
+                }
+            });
+
+            let prev = currentStep > 0 ? steps[currentStep-1].frames : [];
+            let curr = steps[currentStep].frames;
+
+            let changedIndex = -1;
+
+            for (let i = 0; i < curr.length; i++) {
+                if (prev[i] !== curr[i]) {
+                    changedIndex = i;
+                    break;
+                }
+            }
+
+            if (steps[currentStep].hit) {
+                let page = sequence[currentStep];
+
+                curr.forEach((val, idx) => {
+                    if (val === page && rows[idx+2]?.children[col]) {
+                        rows[idx+2].children[col].classList.add("bg-green-500","text-black");
+                    }
+                });
+
+            } else {
+                if (changedIndex !== -1 && rows[changedIndex+2]?.children[col]) {
+                    rows[changedIndex+2].children[col].classList.add("bg-yellow-500","text-black");
+                }
+            }
+
+            currentStep++;
+            setTimeout(showNext, 2000);
+        }
+
+        showNext();
+        drawGraph();
+
+        if (algorithm === "FIFO") detectBelady();
+        else document.getElementById("beladyMsg").innerText = "Belady applies only to FIFO";
+
+    }, 1000);
+}
+
+function clearCanvas(canvas) {
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawGraph() {
+    const canvas = document.getElementById("graph");
+    clearCanvas(canvas);
+    const ctx = canvas.getContext("2d");
+
+    let x = 10;
+    let base = 70;
+
+    steps.forEach(s => {
+        let h = s.hit ? 20 : 50;
+        ctx.fillStyle = s.hit ? "green" : "yellow";
+        ctx.fillRect(x, base - h, 10, h);
+        x += 20;
+    });
+}
+
+function detectBelady() {
+
+    function fifoFaults(pages, frames) {
+        let set = new Set(), q = [], faults = 0;
+        for (let p of pages) {
+            if (!set.has(p)) {
+                faults++;
+                if (set.size === frames) set.delete(q.shift());
+                set.add(p);
+                q.push(p);
+            }
+        }
+        return faults;
+    }
+
+    let faultsArr = [];
+    let maxFrames = Math.min(steps[0].frames.length + 3, sequence.length);
+
+    for (let f = 1; f <= maxFrames; f++) {
+        faultsArr.push(fifoFaults(sequence, f));
+    }
+
+    let anomalyIndex = -1;
+    for (let i = 1; i < faultsArr.length; i++) {
+        if (faultsArr[i] > faultsArr[i-1]) {
+            anomalyIndex = i;
+            break;
+        }
+    }
+
+    drawBeladyGraph(faultsArr, anomalyIndex);
+
+    document.getElementById("beladyMsg").innerText =
+        anomalyIndex !== -1 ? "⚠ Belady’s Anomaly Detected!" : "No Belady’s Anomaly";
+}
+
+function drawBeladyGraph(arr, anomalyIndex) {
+
+    const canvas = document.getElementById("beladyGraph");
+    clearCanvas(canvas);
+    const ctx = canvas.getContext("2d");
+
+    let x = 40, base = 180, barWidth = 30, gap = 40;
+
+    ctx.font = "12px Arial";
+    ctx.textAlign = "center";
+
+    arr.forEach((val, i) => {
+        let height = val * 5;
+
+        ctx.fillStyle = (i === anomalyIndex) ? "#ef4444" : "#e5e7eb";
+        ctx.fillRect(x, base - height, barWidth, height);
+
+        ctx.fillStyle = "white";
+        ctx.fillText(val, x + barWidth/2, base - height - 5);
+
+        ctx.fillStyle = "#9ca3af";
+        ctx.fillText("F" + (i+1), x + barWidth/2, base + 15);
+
+        x += gap;
+    });
+
+    if (anomalyIndex !== -1) {
+        ctx.fillStyle = "#ef4444";
+        ctx.fillText("↑ Anomaly", 40 + anomalyIndex * gap + barWidth/2, 30);
+    }
+}
+
+window.onload = startSimulation;
+
+<% } %>
+</script>
+
+</body>
+</html>
