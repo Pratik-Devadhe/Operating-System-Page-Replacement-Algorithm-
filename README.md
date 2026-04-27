@@ -48,13 +48,11 @@ The goal is to help understand **Demand Paging** and how OS efficiently manages 
 ## 🖥️ Screenshots
 
 ### 🔹 Simulation Output
-![Simulation](./screenshot/pageHit.png)
+![Simulation](./Screenshot/pageHit.png)
 
-### 🔹 Page Hit & Fault Visualization
-![HitsFaults](./screenshots/hit_fault.png)
 
-### 🔹 Graph Comparison
-![Graph](./screenshots/anamaly.png)
+### 🔹 Belady's anamaly
+![Graph](./Screenshot/anamaly.png)
 
 
 ---
